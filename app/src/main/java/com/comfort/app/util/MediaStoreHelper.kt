@@ -23,6 +23,8 @@ object MediaStoreHelper {
      * lyrics couldn't sit beside it there), and galleries and music players still index the media
      * in it. */
     const val RELATIVE_DIR = "Download/Comfort"
+    /** Audio is placed in Android's standard Music collection so dedicated players index it. */
+    private const val MUSIC_RELATIVE_DIR = "Music/Comfort"
 
     /** Android 7-9 save into the public Downloads folder directly ([saveToMediaStore]'s legacy
      * path), which needs WRITE_EXTERNAL_STORAGE — a runtime permission there, declared in the
@@ -60,7 +62,7 @@ object MediaStoreHelper {
             }
         }.getOrNull() ?: return false
         val folder = path.trimStart('/')
-        return folder.startsWith("$RELATIVE_DIR/") || OLD_RELATIVE_DIRS.any { folder.startsWith(it) }
+        return folder.startsWith("$RELATIVE_DIR/") || folder.startsWith("$MUSIC_RELATIVE_DIR/") || OLD_RELATIVE_DIRS.any { folder.startsWith(it) }
     }
 
     /** Where downloads went before they moved to [RELATIVE_DIR] — [organizeSavedFiles] moves them. */
@@ -418,8 +420,10 @@ object MediaStoreHelper {
             // Pre-scoped-storage devices (API 24-28): write straight into the public dir, then index it.
             val collection = legacyCollectionFor(mimeType)
             @Suppress("DEPRECATION")
-            val publicRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            val publicDir = File(publicRoot, "Comfort/${subfolderFor(sourceFile.name, mimeType)}")
+            val publicRoot = Environment.getExternalStoragePublicDirectory(
+                if (mimeType.startsWith("audio/")) Environment.DIRECTORY_MUSIC else Environment.DIRECTORY_DOWNLOADS
+            )
+            val publicDir = File(publicRoot, if (mimeType.startsWith("audio/")) "Comfort" else "Comfort/${subfolderFor(sourceFile.name, mimeType)}")
             if (!publicDir.exists()) publicDir.mkdirs()
             val destFile = uniqueFile(publicDir, sourceFile.name)
             try {
@@ -456,11 +460,13 @@ object MediaStoreHelper {
         val resolver = context.contentResolver
         // The Downloads collection is the one that accepts Download/ paths, for any file type; the
         // media scanner still files each row as an image, video or song by its MIME type.
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val isAudio = mimeType.startsWith("audio/")
+        val collection = if (isAudio) MediaStore.Audio.Media.EXTERNAL_CONTENT_URI else MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val relativePath = if (isAudio) MUSIC_RELATIVE_DIR else "$RELATIVE_DIR/${subfolderFor(sourceFile.name, mimeType)}"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "$RELATIVE_DIR/${subfolderFor(sourceFile.name, mimeType)}")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
         val uri = runCatching { resolver.insert(collection, values) }.getOrNull() ?: return null
