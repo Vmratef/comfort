@@ -115,8 +115,11 @@ object CookieStore {
      * merged in over that host's previous lines. Returns the new file, or null when there was
      * nothing to save (no host, no cookies). */
     fun saveFromBrowser(context: Context, url: String, cookieHeader: String?): String? {
-        val host = android.net.Uri.parse(url).host
-            ?: runCatching { java.net.URI(url).host }.getOrNull()
+        val parsed = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return null
+        // Never persist cookies extracted from an insecure page or a URL without a real host.
+        if (!parsed.scheme.equals("https", ignoreCase = true)) return null
+        val host = parsed.host?.lowercase()?.trimEnd('.')
+            ?: runCatching { java.net.URI(url).host?.lowercase()?.trimEnd('.') }.getOrNull()
         if (host.isNullOrBlank() || cookieHeader.isNullOrBlank()) return null
         val existing = read(context)
         return mergeNetscapeCookies(existing, host, cookieHeader).also { write(context, it) }
@@ -246,7 +249,11 @@ fun groupCookiesBySite(cookies: List<ParsedCookie>): List<SiteCookies> {
 fun mergeNetscapeCookies(existing: String, host: String, cookieHeader: String): String {
     val cleanHost = host.removePrefix(".").removePrefix("www.").substringBefore(':').lowercase()
     val site = CookieStore.registrableDomain(cleanHost)
-    val domain = ".$site"
+    // CookieManager.getCookie() does not expose each cookie's original Domain attribute.
+    // Save these as host-only cookies instead of widening them to every subdomain of the
+    // registrable site (e.g. a login page on www.instagram.com must not authorize instagram.com
+    // and unrelated sibling subdomains).
+    val domain = cleanHost
     val replaced = setOf(site, cleanHost)
     // Five years out — CookieManager doesn't expose each cookie's real expiry, and a long-lived
     // session cookie being treated as farther in the future than it really is just means it stops
@@ -258,7 +265,7 @@ fun mergeNetscapeCookies(existing: String, host: String, cookieHeader: String): 
         val name = pair.substring(0, idx).trim().replace(Regex("[\\t\\r\\n]"), "")
         val value = pair.substring(idx + 1).trim().replace(Regex("[\\t\\r\\n]"), "")
         if (name.isEmpty()) return@mapNotNull null
-        "$domain\tTRUE\t/\tTRUE\t$expiry\t$name\t$value"
+        "$domain\tFALSE\t/\tTRUE\t$expiry\t$name\t$value"
     }
     val keptExisting = existing.lineSequence()
         .filter { line ->
