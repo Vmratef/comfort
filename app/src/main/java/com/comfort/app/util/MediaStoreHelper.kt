@@ -2,6 +2,7 @@ package com.comfort.app.util
 
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -10,6 +11,8 @@ import androidx.documentfile.provider.DocumentFile
 import com.comfort.app.data.GalleryDlPreferences
 import java.io.File
 import java.net.URLConnection
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -438,10 +441,37 @@ object MediaStoreHelper {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, destFile.name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                if (mimeType.startsWith("audio/")) {
+                    // Some Android 8/9 music players query IS_MUSIC explicitly. Mark the row as
+                    // music rather than relying on a later scanner pass to infer it from the path.
+                    put(MediaStore.Audio.Media.IS_MUSIC, 1)
+                }
                 @Suppress("DEPRECATION")
                 put(MediaStore.MediaColumns.DATA, destFile.absolutePath)
             }
-            context.contentResolver.insert(collection, values)
+            // First create the row (so a scanner timeout can never make a successful copy look
+            // like a failed save), then ask Android's media scanner to index the actual file.
+            // Directly inserting DATA alone can leave a row that exists in MediaStore but is not
+            // fully picked up by music apps on older EMUI/Android 9 builds.
+            val insertedUri = runCatching { context.contentResolver.insert(collection, values) }.getOrNull()
+            if (!mimeType.startsWith("audio/")) return insertedUri
+
+            val latch = CountDownLatch(1)
+            var scannedUri: Uri? = null
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(destFile.absolutePath),
+                arrayOf(mimeType),
+            ) { _, uri ->
+                scannedUri = uri
+                latch.countDown()
+            }
+            try {
+                latch.await(15, TimeUnit.SECONDS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            scannedUri ?: insertedUri
         }
     }
 
