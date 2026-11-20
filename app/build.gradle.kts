@@ -40,17 +40,9 @@ android {
         abi {
             isEnable = true
             reset()
-            // armeabi-v7a added for real budget devices (Samsung's own A0-Core line confirmed) that
-            // ship a 32-bit-only Android build despite 64-bit-capable silicon — Build.SUPPORTED_ABIS
-            // reports armeabi-v7a there with no arm64-v8a at all, so without this split the app
-            // installed and ran (no native-code dependency in the Kotlin/Compose UI) but every
-            // native-backed feature silently had nothing to load, surfacing as PythonRuntime's
-            // graceful "Failed to provision the Python runtime" rather than a crash. All four
-            // native components (python/qjs/aria2c/ffmpeg) now exist for this ABI —
-            // jniLibs/armeabi-v7a/lib{python,qjs,aria2c,ffmpeg}* — python/qjs/aria2c from
-            // ytdlnis-packages, ffmpeg the same own build every ABI uses (see FfmpegRuntime).
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
-            isUniversalApk = true
+            // This build is intentionally for the user's ARM64 device only.
+            include("arm64-v8a")
+            isUniversalApk = false
         }
     }
 
