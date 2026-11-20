@@ -247,7 +247,7 @@ fun groupCookiesBySite(cookies: List<ParsedCookie>): List<SiteCookies> {
  * subdomain only, so the engines sent none of it to www.youtube.com and stayed logged out. Lines
  * for the site's other subdomains (from a pasted cookies.txt) are kept: this page didn't show them. */
 fun mergeNetscapeCookies(existing: String, host: String, cookieHeader: String): String {
-    val cleanHost = host.removePrefix(".").removePrefix("www.").substringBefore(':').lowercase()
+    val cleanHost = host.removePrefix(".").substringBefore(':').lowercase()
     val site = CookieStore.registrableDomain(cleanHost)
     // CookieManager.getCookie() does not expose each cookie's original Domain attribute.
     // Save these as host-only cookies instead of widening them to every subdomain of the
