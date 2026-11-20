@@ -249,6 +249,16 @@ class DownloadWorker(
         return title.startsWith(parts[0]) && title.endsWith(parts[1]) && title.length > parts[0].length + parts[1].length
     }
 
+    /** WorkManager calls this before starting expedited work. Without an override,
+     * CoroutineWorker's default implementation throws IllegalStateException("Not implemented"),
+     * which fails the job before doWork() can promote itself with setForeground(). */
+    override suspend fun getForegroundInfo(): ForegroundInfo = ForegroundInfo(
+        DownloadNotifications.FOREGROUND_SERVICE_NOTIFICATION_ID,
+        DownloadNotifications.foregroundServiceNotification(applicationContext),
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q)
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0,
+    )
+
     override suspend fun doWork(): Result {
         // Result.success() here too (never expected to actually trigger — WorkManager's own input
         // is always set by DownloadDispatcher) — same reasoning throughout this file: failure()
