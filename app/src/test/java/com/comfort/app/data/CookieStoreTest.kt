@@ -143,7 +143,7 @@ class CookieStoreTest {
         assertEquals(listOf("id", "session", "theme"), cookies.map { it.name }.sorted())
         val sessionCookie = cookies.single { it.name == "session" }
         assertEquals("fresh", sessionCookie.value)
-        assertEquals(".example.com", sessionCookie.domain)
+        assertEquals("www.example.com", sessionCookie.domain)
         assertTrue(merged.contains("www.example.com\tFALSE"))
         assertFalse(merged.contains("old_csrf"))
     }
