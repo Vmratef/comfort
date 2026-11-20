@@ -50,6 +50,15 @@ jobs:
             echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
           done
 
+      # Downloadable APK from the Actions run (Artifacts, retained for 14 days).
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v5
+        with:
+          name: comfort-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
       # What failed, when a test did.
       - name: Upload test reports
         if: failure()
