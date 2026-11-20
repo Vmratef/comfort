@@ -60,7 +60,7 @@ class CookieStoreTest {
         assertEquals(listOf("id", "session"), cookies.map { it.name }.sorted())
         val sessionCookie = cookies.single { it.name == "session" }
         assertEquals("fresh", sessionCookie.value)
-        assertEquals(".example.com", sessionCookie.domain)
+        assertEquals("www.example.com", sessionCookie.domain)
         assertFalse(merged.contains("old_www"))
         assertFalse(merged.contains("old_sub"))
     }
@@ -131,7 +131,7 @@ class CookieStoreTest {
     }
 
     @Test
-    fun `browser merge strips leading www from host so cookies apply to apex domain`() {
+    fun `browser merge keeps www host-only instead of widening cookies to apex domain`() {
         val existing = listOf(
             CookieStore.HEADER,
             row("www.example.com", "session", "old"),
@@ -144,13 +144,13 @@ class CookieStoreTest {
         val sessionCookie = cookies.single { it.name == "session" }
         assertEquals("fresh", sessionCookie.value)
         assertEquals(".example.com", sessionCookie.domain)
-        assertFalse(merged.contains("www.example.com"))
+        assertTrue(merged.contains("www.example.com\tFALSE"))
         assertFalse(merged.contains("old_csrf"))
     }
 
     @Test
-    fun `browser merge on a subdomain saves the cookies for the whole site`() {
-        // A login that ended on m.example.com (YouTube's mobile pages) must reach www.example.com.
+    fun `browser merge on a subdomain keeps new cookies scoped to that host`() {
+        // Cookies extracted from m.example.com must not be widened to sibling subdomains.
         val existing = listOf(
             CookieStore.HEADER,
             row(".example.com", "session", "old"),
@@ -160,9 +160,9 @@ class CookieStoreTest {
         ).joinToString("\n")
         val merged = mergeNetscapeCookies(existing, "m.example.com", "session=fresh; theme=dark")
         val cookies = parseCookiesFile(merged)
-        assertEquals(".example.com", cookies.single { it.name == "session" }.domain)
+        assertEquals("m.example.com", cookies.single { it.name == "session" }.domain)
         assertEquals("fresh", cookies.single { it.name == "session" }.value)
-        assertEquals(".example.com", cookies.single { it.name == "theme" }.domain)
+        assertEquals("m.example.com", cookies.single { it.name == "theme" }.domain)
         assertFalse("the page host's old lines are replaced", cookies.any { it.name == "pref" })
         assertEquals("another subdomain's line stays", "keep", cookies.single { it.name == "cart" }.value)
         assertEquals("ccc", cookies.single { it.name == "id" }.value)
