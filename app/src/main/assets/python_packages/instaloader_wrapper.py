@@ -235,12 +235,6 @@ def _new_loader(session_cookies, proxy_url, timeout_seconds):
     return loader
 
 
-def _is_rate_limited(exc):
-    response = getattr(exc, "response", None)
-    status = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
-    return isinstance(exc, _RateLimited) or status == 429 or "429" in str(exc).lower()
-
-
 def _friendly_error(exc):
     if isinstance(exc, _ProxyUnsupported):
         return "Instaloader can't use a SOCKS proxy — use an http:// proxy, or turn off Instaloader in Settings"
@@ -481,9 +475,6 @@ def _download_post(loader, post, from_cache, items, url, download_dir, cookies_p
         except _TooLarge:
             continue
         except Exception as exc:  # noqa: BLE001
-            if _is_rate_limited(exc):
-                emit(event("error", message="ERROR: Instagram is rate-limiting requests right now — pausing this post to avoid more 429 responses"))
-                break
             emit(event("error", message=f"ERROR: {_friendly_error(exc)}"))
             continue
         prefix = os.path.basename(base) + "."

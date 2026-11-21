@@ -2602,14 +2602,7 @@ def download(url, download_dir, cookies_path=None, callback=None, filename_forma
         # because the photo item (processed first) raised before yt-dlp ever reached the videos.
         # "only_download" still lets a genuine extraction-level failure (bad URL, private/deleted
         # post, etc.) raise normally — it only tolerates individual items failing mid-playlist.
-        # Instagram carousels can contain photo children for which yt-dlp legitimately has no
-        # video formats. Unlike a normal failed single URL, one such child must not abort the
-        # remaining carousel entries. Fully ignore per-entry extraction failures only for an
-        # Instagram playlist; a single Instagram URL and every other site keep the stricter policy.
-        "ignoreerrors": (
-            True if not no_playlist and "instagram.com/" in url.lower()
-            else (False if no_playlist else "only_download")
-        ),
+        "ignoreerrors": False if no_playlist else "only_download",
     }
     if verbose:
         # Every internal debug line yt-dlp itself would print with --verbose on the real CLI, not

@@ -948,7 +948,6 @@ class DownloadWorker(
                         // authentication is required") is the useful one. sanitizeErrorMessage
                         // changing the text is the signal that the kept error is that garbage.
                         is EngineEvent.Error -> {
-                            GalleryDlListing.noteInstagramRateLimit(url, event.message)
                             lastErrorLine.getAndUpdate { current ->
                                 if (current == null || GalleryDlListing.sanitizeErrorMessage(current) != current || (isNotItsKind(current) && !isNotItsKind(event.message))) event.message else current
                             }
@@ -1058,9 +1057,7 @@ class DownloadWorker(
                 val executor = object : EngineExecutor {
                     override suspend fun run(engine: DownloadEngine, excludeVideo: Boolean) {
                         val command = commands.forEngine(engine, excludeVideo)
-                        GalleryDlListing.withInstagramRequest(url) {
-                            PythonRuntime.run(applicationContext, command.script, command.args, callbackFor(command.label))
-                        }
+                        PythonRuntime.run(applicationContext, command.script, command.args, callbackFor(command.label))
                     }
                     // A live, no-network check against the bundled engines (EngineProbe) — only a
                     // gallery-dl-routed plan asks, to skip a gallery-dl attempt that can't work.
