@@ -320,18 +320,23 @@ object MediaStoreHelper {
      * exposing all of cacheDir — see file_paths.xml) turns the resulting cache file back into a
      * content:// Uri so both Coil (in-process) and the Library screen's own share/open intents
      * (out-of-process) can read it the same way any other thumbnailPath already works. */
-    fun extractAudioArtworkUri(context: Context, savedUri: Uri, downloadId: String): Uri? {
+    fun extractAudioArtworkUri(context: Context, sourceFile: File, downloadId: String): Uri? {
+        if (!sourceFile.isFile || sourceFile.length() == 0L) return null
         val retriever = android.media.MediaMetadataRetriever()
         return try {
-            retriever.setDataSource(context, savedUri)
+            // Read the exact staged song, not its MediaStore row. On older Android builds the
+            // scanner can return a different/reused row URI; reading the source path guarantees
+            // that every playlist item yields artwork from its own bytes.
+            retriever.setDataSource(sourceFile.absolutePath)
             val art = retriever.embeddedPicture ?: return null
             val dir = File(context.cacheDir, "audio_art").apply { mkdirs() }
-            // One per song, not per download: a playlist's songs used to share "<id>.jpg", each
-            // overwriting the last, so the Library tile ended up showing the last song's cover.
-            // "<downloadId>_<song>": FoldersSettings' Clear cache keeps it by the part before "_"
-            // (download ids are UUIDs, no "_").
-            val song = savedUri.lastPathSegment?.filter { it.isLetterOrDigit() }?.takeIf { it.isNotEmpty() }
-            val file = File(dir, if (song != null) "${downloadId}_$song.jpg" else "$downloadId.jpg")
+            // One deterministic, unique file per song. A playlist shares one downloadId, so the
+            // source-file path hash is part of the name; never let one track overwrite another.
+            // FoldersSettings' Clear cache keeps it by the part before "_" (download ids are UUIDs).
+            val key = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(sourceFile.canonicalPath.toByteArray(Charsets.UTF_8))
+                .take(12).joinToString("") { "%02x".format(it) }
+            val file = File(dir, "${downloadId}_$key.jpg")
             file.writeBytes(art)
             androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         } catch (e: Exception) {
