@@ -61,7 +61,7 @@ private fun songFromFile(context: Context, download: DownloadEntity, uri: Uri, i
         album = album?.takeIf { it.isNotBlank() } ?: download.album,
         // Its own embedded cover (the download's thumbnail is the playlist's).
         cover = AudioCover(file, null),
-        placeholderKey = thumbnailCacheKey(download.id),
+        placeholderKey = thumbnailCacheKey(id),
         artworkUri = uri,
     )
 }
