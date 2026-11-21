@@ -11,6 +11,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -313,12 +314,53 @@ object GalleryDlListing {
 
     private fun ytDlpOn(context: Context) = GalleryDlPreferences.isEngineEnabled(context, DownloadEngine.YT_DLP)
 
-    suspend fun listItems(context: Context, url: String): ListingResult = withContext(Dispatchers.IO) {
-        listingCache[url]?.let { cached ->
-            if (System.currentTimeMillis() - cached.atMs < LISTING_CACHE_MS) return@withContext cached.result
+    // Instagram is unusually sensitive to overlapping extractor requests: running Instaloader,
+    // gallery-dl and yt-dlp at the same time can turn one post preview into several simultaneous
+    // GraphQL/media requests and trigger HTTP 429. Serialize Instagram work in-process and keep a
+    // short spacing between independent extractor calls. Other sites retain their parallel path.
+    private val instagramRequestMutex = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var instagramCooldownUntilMs = 0L
+    @Volatile private var lastInstagramRequestAtMs = 0L
+
+    internal suspend fun <T> withInstagramRequest(url: String, block: suspend () -> T): T {
+        if (!VideoSiteRouter.isInstagramPost(url)) return block()
+        return instagramRequestMutex.withLock {
+            val now = System.currentTimeMillis()
+            val waitMs = maxOf(
+                instagramCooldownUntilMs - now,
+                lastInstagramRequestAtMs + 1_500L - now,
+                0L,
+            )
+            if (waitMs > 0L) kotlinx.coroutines.delay(waitMs)
+            try {
+                block()
+            } finally {
+                lastInstagramRequestAtMs = System.currentTimeMillis()
+            }
         }
-        listItemsUncached(context, url).also { result ->
-            if (result.items.isNotEmpty()) listingCache[url] = CachedListing(result, System.currentTimeMillis())
+    }
+
+    internal fun noteInstagramRateLimit(url: String, message: String) {
+        if (VideoSiteRouter.isInstagramPost(url) &&
+            Regex("""\\b(429|rate.?limit|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
+        ) {
+            // Instagram's Retry-After can be several minutes. Do not hammer it with the next
+            // fallback immediately; the next attempt waits two minutes at minimum.
+            instagramCooldownUntilMs = maxOf(instagramCooldownUntilMs, System.currentTimeMillis() + 120_000L)
+        }
+    }
+
+    suspend fun listItems(context: Context, url: String): ListingResult = withContext(Dispatchers.IO) {
+        withInstagramRequest(url) {
+            listingCache[url]?.let { cached ->
+                if (System.currentTimeMillis() - cached.atMs < LISTING_CACHE_MS) return@withInstagramRequest cached.result
+            }
+            listItemsUncached(context, url).also { result ->
+                if (result.errorMessage?.let { Regex("""\\b(429|rate.?limit|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(it) } == true) {
+                    noteInstagramRateLimit(url, result.errorMessage.orEmpty())
+                }
+                if (result.items.isNotEmpty()) listingCache[url] = CachedListing(result, System.currentTimeMillis())
+            }
         }
     }
 
