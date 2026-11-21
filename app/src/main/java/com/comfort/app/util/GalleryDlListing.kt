@@ -342,7 +342,7 @@ object GalleryDlListing {
 
     internal fun noteInstagramRateLimit(url: String, message: String) {
         if (VideoSiteRouter.isInstagramPost(url) &&
-            Regex("""\\b(429|rate.?limit|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
+            Regex("""\\b(429|rate.?limit\\w*|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
         ) {
             // Instagram's Retry-After can be several minutes. Do not hammer it with the next
             // fallback immediately; the next attempt waits two minutes at minimum.
@@ -356,7 +356,7 @@ object GalleryDlListing {
                 if (System.currentTimeMillis() - cached.atMs < LISTING_CACHE_MS) return@withInstagramRequest cached.result
             }
             listItemsUncached(context, url).also { result ->
-                if (result.errorMessage?.let { Regex("""\\b(429|rate.?limit|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(it) } == true) {
+                if (result.errorMessage?.let { Regex("""\\b(429|rate.?limit\\w*|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(it) } == true) {
                     noteInstagramRateLimit(url, result.errorMessage.orEmpty())
                 }
                 if (result.items.isNotEmpty()) listingCache[url] = CachedListing(result, System.currentTimeMillis())
@@ -367,7 +367,7 @@ object GalleryDlListing {
     private suspend fun listItemsUncached(context: Context, url: String): ListingResult {
         if (VideoSiteRouter.resolveEngine(context, url) == DownloadEngine.INSTALOADER) {
             val result = listViaInstaloader(context, url)
-            if (result.items.isNotEmpty()) return result
+            if (result.items.isNotEmpty() || isInstagramRateLimit(result.errorMessage)) return result
             // Same fallback the real download makes (DownloadWorker): Instaloader coming back
             // empty hands the link to the classic engines. Its own error is kept only if they
             // fail too — it's usually the clearer explanation for an Instagram post.
@@ -427,7 +427,7 @@ object GalleryDlListing {
     }
 
     private fun isInstagramRateLimit(message: String?): Boolean =
-        !message.isNullOrBlank() && Regex("""\\b(429|rate.?limit|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
+        !message.isNullOrBlank() && Regex("""\\b(429|rate.?limit\\w*|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
 
     private suspend fun listInstagramClassic(context: Context, url: String): ListingResult {
         val galleryEnabled = GalleryDlPreferences.isEngineEnabled(context, DownloadEngine.GALLERY_DL) &&
