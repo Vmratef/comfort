@@ -430,8 +430,7 @@ object GalleryDlListing {
         !message.isNullOrBlank() && Regex("""\b(429|rate.?limit\w*|too many requests)\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
 
     private suspend fun listInstagramClassic(context: Context, url: String): ListingResult {
-        val galleryEnabled = GalleryDlPreferences.isEngineEnabled(context, DownloadEngine.GALLERY_DL) &&
-            !VideoSiteRouter.isGalleryDlOnly(url)
+        val galleryEnabled = GalleryDlPreferences.isEngineEnabled(context, DownloadEngine.GALLERY_DL)
         val ytEnabled = ytDlpOn(context) && !VideoSiteRouter.isGalleryDlOnly(url)
 
         val gallery = if (galleryEnabled && VideoSiteRouter.classify(url) == DownloadEngine.GALLERY_DL) {
