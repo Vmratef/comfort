@@ -1110,21 +1110,8 @@ fun HomeScreen(
     }
     var clipboardSuggestion by remember { mutableStateOf<String?>(null) }
     val queueItems by viewModel.queueFlow.collectAsStateWithLifecycle()
-    val historyItems by viewModel.historyFlow.collectAsStateWithLifecycle()
-    // Most-recent RUNNING item — a summary screen only ever needs to surface one at a time; the
-    // full Queue is one tap away (onOpenQueue) for anything more than that.
+    // Most-recent RUNNING item — the full Queue is one tap away for anything more.
     val activeDownload = remember(queueItems) { queueItems.firstOrNull { it.status == DownloadStatus.RUNNING } }
-    // Pre-seeded from RecentDownloadsCache on Frame 1 to prevent content layout shift and pop-in.
-    val cachedRecent = remember { com.comfort.app.data.RecentDownloadsCache.get(homeContext) }
-    val recentDownloads = remember(historyItems, cachedRecent) {
-        if (historyItems.isNotEmpty()) {
-            val filtered = historyItems.filter { !it.thumbnailPath.isNullOrBlank() }.take(10)
-            com.comfort.app.data.RecentDownloadsCache.save(homeContext, filtered)
-            filtered
-        } else {
-            cachedRecent
-        }
-    }
 
     fun normalizeInputUrl(input: String): String {
         val trimmed = input.trim()
@@ -1507,100 +1494,7 @@ fun HomeScreen(
                 }
             }
 
-            if (recentDownloads.isNotEmpty()) {
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    stringResource(R.string.recently_downloaded),
-                    style = MaterialTheme.typography.titleSmall.copy(fontFamily = com.comfort.app.theme.HeaderFontFamily),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(12.dp))
-                val recentListState = rememberLazyListState()
-                // A genuinely continuous, slow drift (not the earlier per-item jump-and-pause)
-                // once the user's left it alone for a while — an idle showcase, not something
-                // fighting a real swipe. scrollBy() runs at MutatePriority.Default, the same
-                // priority auto-scroll conventionally uses; a real drag gesture is handled by the
-                // LazyRow's own built-in touch machinery at UserInput priority, which Compose's
-                // scroll mutex always lets preempt a lower-priority caller, so a user grabbing the
-                // list mid-drift interrupts this loop's current scrollBy call automatically — the
-                // isDragged check below just avoids wastefully *starting* a new one while they're
-                // still holding it, on top of that.
-                val isRecentListDragged by recentListState.interactionSource.collectIsDraggedAsState()
-                val reducedMotion = com.comfort.app.util.rememberIsReducedMotionEnabled()
-                val homeWindowFocused = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
-                // One whole pixel per step at ~25 dp a second (the old 1.1 px every 16 ms on a
-                // typical screen): a fraction of a pixel moved nothing on screen but still cost a
-                // frame.
-                val driftStepMs = with(androidx.compose.ui.platform.LocalDensity.current) { (1000f / 25.dp.toPx()).toLong().coerceAtLeast(8L) }
-                LaunchedEffect(recentDownloads.size, reducedMotion, homeWindowFocused) {
-                    if (recentDownloads.size <= 1 || reducedMotion || !homeWindowFocused) return@LaunchedEffect
-                    // Only while Home is on screen and the app is in front (see `active`).
-                    androidx.compose.runtime.snapshotFlow { active() }.collectLatest { onScreen ->
-                    if (!onScreen) return@collectLatest
-                    kotlinx.coroutines.delay(3500)
-                    // One pass to the end and back, then it stays still: every step is a frame, and
-                    // drifting for as long as Home was open kept the phone from ever idling there
-                    // (~100 redraws a second, traced). Coming back to Home, or a new download,
-                    // starts it again.
-                    while (true) {
-                        if (isRecentListDragged) {
-                            kotlinx.coroutines.delay(200)
-                            continue
-                        }
-                        if (!recentListState.canScrollForward) break
-                        recentListState.scrollBy(1f)
-                        kotlinx.coroutines.delay(driftStepMs)
-                    }
-                    kotlinx.coroutines.delay(1800)
-                    recentListState.animateScrollToItem(0)
-                    }
-                }
-                // Comfort: a tap opens the item in the media viewer, paging through the strip.
-                val openViewer = com.comfort.app.ui.viewer.LocalOpenMediaViewer.current
-                LazyRow(
-                    state = recentListState,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    // The earlier Modifier.padding() here was the actual bug: applied after the
-                    // bleed widening, it shrinks the LazyRow's own *viewport*, which just moves
-                    // where the clipped edge sits — it can never let scrolling actually reach past
-                    // it, no matter how much extra width the bleed measures into. contentPadding
-                    // is the real mechanism for "inset at rest, reachable by scrolling": it pads
-                    // the *scrollable content* within a full-width viewport, not the viewport
-                    // itself, so the leading/trailing item can still scroll into that space. The
-                    // bleed layout below still does need to stay, though — it's the only thing
-                    // giving this row a full-width viewport to begin with, escaping the parent
-                    // Column's own 24dp margin that would otherwise cap it regardless.
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .layout { measurable, constraints ->
-                            val bleed = 24.dp.roundToPx()
-                            val placeable = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + bleed * 2))
-                            layout(placeable.width - bleed * 2, placeable.height) {
-                                placeable.placeRelative(-bleed, 0)
-                            }
-                        },
-                    contentPadding = PaddingValues(horizontal = 24.dp),
-                ) {
-                    items(recentDownloads, key = { it.id }) { item ->
-                        RecentDownloadThumbnail(
-                            item = item,
-                            onClick = {
-                                val viewable = recentDownloads.filter { it.status != com.comfort.app.data.DownloadStatus.DELETED }
-                                if (item in viewable) {
-                                    openViewer(com.comfort.app.ui.viewer.MediaViewerRequest(viewable, item.id))
-                                } else {
-                                    onOpenLibrary()
-                                }
-                            },
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            HomeTipsCarousel()
-
-            // Matches navBarClearance() below — content needs to be able to scroll clear
+                        // Matches navBarClearance() below — content needs to be able to scroll clear
             // of the floating pill now that it overlays on top instead of reserving its own
             // Scaffold-managed space (see MainScreen's own comment on that change).
             Spacer(Modifier.height(navBarClearance()))
@@ -1819,79 +1713,6 @@ private fun HomeCardThumbnail(path: String?, refererUrl: String, title: String, 
             }
         },
     )
-}
-
-// Short, rotating tips highlighting features that are easy to miss otherwise — long-press
-// multi-select and auto-updating engines especially, both added the same session this carousel
-// was, with no other obvious discovery path on Home.
-private val HOME_TIPS = listOf(
-    R.string.long_press_a_card_in_queue to Icons.Outlined.CheckBox,
-    R.string.yt_dlp_gallery_dl_and_instaloader to Icons.Outlined.Refresh,
-    R.string.add_cookies_from_settings_to_unlock to Icons.Outlined.Lock,
-    R.string.tap_a_queued_download_s_up to Icons.Outlined.Bolt,
-    R.string.choose_mp4_or_mkv_output_and to Icons.Outlined.Settings,
-)
-
-@Composable
-private fun HomeTipsCarousel() {
-    var index by remember { mutableIntStateOf(0) }
-    val reducedMotion = com.comfort.app.util.rememberIsReducedMotionEnabled()
-    val windowInfo = androidx.compose.ui.platform.LocalWindowInfo.current
-    LaunchedEffect(reducedMotion, windowInfo.isWindowFocused) {
-        if (reducedMotion || !windowInfo.isWindowFocused) return@LaunchedEffect
-        while (true) {
-            kotlinx.coroutines.delay(6000)
-            index = (index + 1) % HOME_TIPS.size
-        }
-    }
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                onClickLabel = stringResource(R.string.next_tip),
-                role = androidx.compose.ui.semantics.Role.Button,
-            ) {
-                index = (index + 1) % HOME_TIPS.size
-            },
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        AnimatedContent(
-            targetState = index,
-            transitionSpec = {
-                if (reducedMotion) {
-                    androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-                } else {
-                    (slideInVertically { it / 3 } + androidx.compose.animation.fadeIn(tween(300))) togetherWith
-                        (slideOutVertically { -it / 3 } + androidx.compose.animation.fadeOut(tween(300)))
-                }
-            },
-            label = "homeTip",
-        ) { i ->
-            val (tipRes, icon) = HOME_TIPS[i]
-            val tip = stringResource(tipRes)
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                }
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    tip,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
 }
 
 /** Whether Home's field holds a link (opened as a download) rather than words to search YouTube
