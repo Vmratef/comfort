@@ -734,7 +734,6 @@ class DownloadWorker(
                         lastErrorLine.compareAndSet(null, "Couldn't save ${original.name} to the gallery")
                         dao.forgetDownloadedFile(downloadId, original.name)
                     } else {
-                        candidate.delete()
                         // Saved on a second try (the sweep): no longer missing.
                         if (saveFailures.remove(original.name) != null && saveFailures.isEmpty() &&
                             lastErrorLine.get()?.startsWith("Couldn't save ") == true
@@ -759,6 +758,9 @@ class DownloadWorker(
                         // isAudio is extension-derived and always right for a given
                         // file, so it's set unconditionally, not IfAbsent.
                         if (isAudioFile) dao.setIsAudio(downloadId, true)
+                        // Extract before deleting the staged source: MediaMetadataRetriever
+                        // must read this exact file. Deleting it earlier made every extraction fail,
+                        // so playlist tracks silently fell back to the same first-track thumbnail.
                         val artworkUri = if (isAudioFile) {
                             MediaStoreHelper.extractAudioArtworkUri(applicationContext, candidate, downloadId)
                         } else {
@@ -772,6 +774,7 @@ class DownloadWorker(
                             dao.setThumbnailIfAbsent(downloadId, thumbnailUri.toString())
                             if (artworkUri != null) dao.setMediaUriIfAbsent(downloadId, savedUri.toString())
                         }
+                        candidate.delete()
                         dao.addBytes(downloadId, fileSize)
                         // Its bytes are in totalBytes now; the card adds liveBytes on top.
                         com.comfort.app.data.LiveProgress.bytes(dao, liveRun, 0, speedMbs)
