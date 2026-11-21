@@ -275,7 +275,7 @@ object PythonRuntime {
         if (!warmUpStarted.compareAndSet(false, true)) return
         val appContext = context.applicationContext
         backgroundScope.launch {
-            kotlinx.coroutines.delay(4_000)
+            kotlinx.coroutines.delay(1_000)
             if (!ensureProvisioned(appContext)) return@launch
             val marker = File(runtimeRoot(appContext), PRECOMPILE_MARKER)
             if (runCatching { marker.readText() }.getOrNull() != PROVISION_VERSION &&
