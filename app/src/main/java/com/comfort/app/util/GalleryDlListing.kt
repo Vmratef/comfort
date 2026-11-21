@@ -377,8 +377,12 @@ object GalleryDlListing {
         return listClassic(context, url)
     }
 
-    private suspend fun listClassic(context: Context, url: String): ListingResult =
-        when (VideoSiteRouter.classify(url)) {
+    private suspend fun listClassic(context: Context, url: String): ListingResult {
+        // Instagram gets a strictly serial path. The normal mixed-gallery path deliberately starts
+        // yt-dlp and gallery-dl together, which is useful elsewhere but doubles Instagram's
+        // GraphQL/media traffic and was triggering 429s on carousel previews.
+        if (VideoSiteRouter.isInstagramPost(url)) return listInstagramClassic(context, url)
+        return when (VideoSiteRouter.classify(url)) {
             // Video-only sources (Reels, YouTube, ...) skip gallery-dl's listing entirely, same as
             // the real download does — gallery-dl either can't parse them at all, or (Instagram
             // Reels specifically) lists them fine but only with an internal "ytdl:"-prefixed
@@ -420,6 +424,40 @@ object GalleryDlListing {
             // Never produced by classify() — only by resolveEngine(), handled in listItems().
             DownloadEngine.INSTALOADER -> ListingResult(emptyList())
         }
+    }
+
+    private fun isInstagramRateLimit(message: String?): Boolean =
+        !message.isNullOrBlank() && Regex("""\\b(429|rate.?limit|too many requests)\\b""", RegexOption.IGNORE_CASE).containsMatchIn(message)
+
+    private suspend fun listInstagramClassic(context: Context, url: String): ListingResult {
+        val galleryEnabled = GalleryDlPreferences.isEngineEnabled(context, DownloadEngine.GALLERY_DL) &&
+            !VideoSiteRouter.isGalleryDlOnly(url)
+        val ytEnabled = ytDlpOn(context) && !VideoSiteRouter.isGalleryDlOnly(url)
+
+        val gallery = if (galleryEnabled && VideoSiteRouter.classify(url) == DownloadEngine.GALLERY_DL) {
+            listViaGalleryDl(context, url)
+        } else {
+            ListingResult(emptyList())
+        }
+        if (gallery.items.isNotEmpty()) {
+            val hasVideo = gallery.items.any { it.filename?.let(VideoSiteRouter::isVideoFilename) == true }
+            if (!hasVideo || !ytEnabled) return gallery
+            // Let the gallery extractor finish before asking yt-dlp for video-only metadata.
+            kotlinx.coroutines.delay(1_500)
+            val info = runYtDlpListInfo(context, url)
+            return if (info == null) gallery else gallery.copy(items = enrichVideoThumbnails(gallery.items, info))
+        }
+        // A 429 is a signal to stop asking Instagram, not a reason to immediately hit it through
+        // another extractor. Keep the useful error and let the shared cooldown protect the next try.
+        if (isInstagramRateLimit(gallery.errorMessage)) {
+            noteInstagramRateLimit(url, gallery.errorMessage.orEmpty())
+            return gallery
+        }
+        if (!ytEnabled) return gallery
+        kotlinx.coroutines.delay(1_500)
+        val fallback = listViaYtDlp(context, url)
+        return if (fallback.items.isEmpty() && gallery.errorMessage != null) gallery else fallback
+    }
 
     /** instaloader_wrapper.py's `list` prints one line of JSON in gallery-dl's own --dump-json
      * shape (see that file's doc comment), so the existing gallery-dl parser reads it unchanged —
@@ -442,7 +480,9 @@ object GalleryDlListing {
                 // interpreter printed to stderr first (merged into this stream) isn't the JSON.
                 lines.lastOrNull { it.isNotBlank() }
             }.onFailure { if (it is CancellationException) throw it }.getOrNull() ?: return ListingResult(emptyList())
-            return parseGalleryDlItems(lastLine, url, context.resources)
+            val result = parseGalleryDlItems(lastLine, url, context.resources)
+            if (isInstagramRateLimit(result.errorMessage)) noteInstagramRateLimit(url, result.errorMessage.orEmpty())
+            return result
         } finally {
             tempCookieFile?.delete()
         }
@@ -497,6 +537,7 @@ object GalleryDlListing {
             }
     
             val parsed = parseGalleryDlItems(jsonText, url, context.resources)
+            if (isInstagramRateLimit(parsed.errorMessage)) noteInstagramRateLimit(url, parsed.errorMessage.orEmpty())
             // A share link (Reddit's /s/<code>, ...) lists nothing itself: gallery-dl answers with
             // a redirect to the real post (a Message.Queue entry) and only follows it when actually
             // downloading. Listed as-is, the preview fell back to yt-dlp — no images, no author, no
