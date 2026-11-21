@@ -760,7 +760,7 @@ class DownloadWorker(
                         // file, so it's set unconditionally, not IfAbsent.
                         if (isAudioFile) dao.setIsAudio(downloadId, true)
                         val artworkUri = if (isAudioFile) {
-                            MediaStoreHelper.extractAudioArtworkUri(applicationContext, savedUri, downloadId)
+                            MediaStoreHelper.extractAudioArtworkUri(applicationContext, candidate, downloadId)
                         } else {
                             null
                         }
